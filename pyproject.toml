@@ -7,6 +7,7 @@ name = "dragon-clawed-tui"
 version = "0.1.0"
 description = "A Python coding-agent TUI for local and OpenAI-compatible models."
 readme = "README.md"
+license = { text = "MIT" }
 requires-python = ">=3.10"
 authors = [
   { name = "Dragon Clawed TUI Contributors" }
@@ -26,6 +27,7 @@ classifiers = [
   "Development Status :: 3 - Alpha",
   "Environment :: Console",
   "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
   "Operating System :: OS Independent",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.10",

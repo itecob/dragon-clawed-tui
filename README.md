@@ -124,4 +124,4 @@ python -m pytest -q tests/test_textual_tui_app.py tests/test_agent_runtime.py te
 
 ## License
 
-License has not been selected yet.
+MIT License. See [LICENSE](LICENSE).

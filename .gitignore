@@ -1,0 +1,35 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+build/
+dist/
+*.egg-info/
+
+archive/
+.omx/
+.clawd-agents/
+
+# Local agent/runtime artifacts
+.claude/
+.claude.json
+.port_sessions/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+
+test_cases
+e-commerce
+
+# Private secrets; never commit copied provider credentials
+secrets.env
+*.secrets.env
+*.secret.env
+.config/clawedcode/
+clawedcode-secrets.env

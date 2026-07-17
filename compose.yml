@@ -1,0 +1,16 @@
+services:
+  claw-code-agent:
+    build: .
+    image: claw-code-agent:local
+    tty: true
+    stdin_open: true
+    working_dir: /workspace
+    volumes:
+      - ./:/workspace
+    environment:
+      # Point this at your OpenAI-compatible backend (vLLM, Ollama, LiteLLM Proxy).
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-http://127.0.0.1:8000/v1}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-local-token}
+      - OPENAI_MODEL=${OPENAI_MODEL:-local-model}
+    command: ["summary"]
+

@@ -1,0 +1,63 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dragon-clawed-tui"
+version = "0.1.0"
+description = "A Python coding-agent TUI for local and OpenAI-compatible models."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+  { name = "Dragon Clawed TUI Contributors" }
+]
+keywords = [
+  "agent",
+  "cli",
+  "coding-agent",
+  "local-model",
+  "python",
+  "tui",
+  "voice",
+  "llama-cpp",
+  "openai-compatible"
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Software Development",
+  "Topic :: Software Development :: Build Tools",
+]
+dependencies = [
+  "rich>=13.0",
+  "textual>=0.89,<1.0",
+  "ddgs>=9,<10",
+  "faster-whisper>=1.0,<2.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/itecob/dragon-clawed-tui"
+Repository = "https://github.com/itecob/dragon-clawed-tui"
+
+[project.scripts]
+claw-code-agent = "src.main:main"
+clawed = "src.clawed_entry:main"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
+
+[tool.setuptools.package-data]
+src = [
+  "reference_data/*.json",
+  "reference_data/subsystems/*.json",
+]

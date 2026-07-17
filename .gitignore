@@ -31,5 +31,4 @@ e-commerce
 secrets.env
 *.secrets.env
 *.secret.env
-.config/clawedcode/
 clawedcode-secrets.env

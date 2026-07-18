@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import Callable, Mapping, Any
-from urllib import error, request
+from urllib import error, parse, request
 
 
 class LifecycleMode(str, Enum):
@@ -57,12 +57,14 @@ class ServiceConfig:
     role: str
     base_url: str | None = None
     model_id: str | None = None
+    api_key: str | None = None
     lifecycle_mode: LifecycleMode = LifecycleMode.EXTERNAL
     host: str = '127.0.0.1'
     port: int | None = None
     runtime_dir: Path | None = None
     pid_file: Path | None = None
     log_file: Path | None = None
+    owner_marker_file: Path | None = None
     executable: str | None = None
     model_path: Path | None = None
     context_size: int | None = None
@@ -140,8 +142,21 @@ class ServiceSupervisor:
             )
 
         owned_pid = self._owned_pid()
+        candidate_pid = self._candidate_pid()
         port_owners = self._port_owners()
         if owned_pid is None:
+            if candidate_pid is not None and (not port_owners or port_owners == (candidate_pid,)):
+                return ServiceHealth(
+                    role=self.config.role,
+                    state=ServiceState.UNKNOWN,
+                    backend_health=BackendHealth.NOT_CHECKED,
+                    message='PID file points to a live matching process, but supervisor ownership marker is missing or invalid.',
+                    base_url=self.config.base_url,
+                    model_id=self.config.model_id,
+                    pid=candidate_pid,
+                    port=self.config.port,
+                    lifecycle_controllable=False,
+                )
             if port_owners:
                 return ServiceHealth(
                     role=self.config.role,
@@ -150,7 +165,7 @@ class ServiceSupervisor:
                     message='Configured port is owned by a process not proven to belong to Dragon Clawed TUI.',
                     base_url=self.config.base_url,
                     model_id=self.config.model_id,
-                    pid=port_owners[0],
+                    pid=next((pid for pid in port_owners if pid != candidate_pid), port_owners[0]),
                     port=self.config.port,
                     lifecycle_controllable=False,
                 )
@@ -160,6 +175,19 @@ class ServiceSupervisor:
                 backend_health=BackendHealth.NOT_CHECKED,
                 base_url=self.config.base_url,
                 model_id=self.config.model_id,
+                port=self.config.port,
+                lifecycle_controllable=False,
+            )
+
+        if self.config.port is None:
+            return ServiceHealth(
+                role=self.config.role,
+                state=ServiceState.UNKNOWN,
+                backend_health=BackendHealth.NOT_CHECKED,
+                message='Owned PID exists, but no configured port exists to verify listener ownership.',
+                base_url=self.config.base_url,
+                model_id=self.config.model_id,
+                pid=owned_pid,
                 port=self.config.port,
                 lifecycle_controllable=False,
             )
@@ -218,7 +246,7 @@ class ServiceSupervisor:
                 backend_health=BackendHealth.NOT_CHECKED,
             )
         url = _join_url(self.config.base_url, '/models')
-        req = request.Request(url, headers={'Authorization': 'Bearer local-token'})
+        req = request.Request(url, headers=_auth_headers(self.config))
         try:
             with self._urlopen(req, timeout=self._timeout_seconds) as response:
                 payload = json.loads(response.read().decode('utf-8'))
@@ -251,7 +279,7 @@ class ServiceSupervisor:
         result = _backend_result(self.config, BackendHealth.HEALTHY, None, 'backend healthy')
         return ServiceHealth(**{**result.__dict__, 'model_present': bool(self.config.model_id), 'raw_models': tuple(models)})
 
-    def _owned_pid(self) -> int | None:
+    def _candidate_pid(self) -> int | None:
         pid = _read_pid_file(self.config.pid_file)
         if pid is None:
             return None
@@ -259,6 +287,14 @@ class ServiceSupervisor:
             return None
         command = self._command_line(pid) or ''
         if not self.config.executable or not _command_matches_executable(command, self.config.executable):
+            return None
+        return pid
+
+    def _owned_pid(self) -> int | None:
+        pid = self._candidate_pid()
+        if pid is None:
+            return None
+        if not _owner_marker_matches(self.config.owner_marker_file, self.config.role, pid):
             return None
         return pid
 
@@ -279,6 +315,7 @@ def supervisor_configs_from_env(env: Mapping[str, str] | None = None) -> dict[st
             role='main',
             base_url=source.get('OPENAI_BASE_URL'),
             model_id=source.get('OPENAI_MODEL'),
+            api_key=source.get('OPENAI_API_KEY'),
             port=main_port,
             runtime_dir=runtime_dir,
         ),
@@ -287,6 +324,7 @@ def supervisor_configs_from_env(env: Mapping[str, str] | None = None) -> dict[st
             role='helper',
             base_url=source.get('CLAWED_HELPER_BASE_URL') or source.get('CLAWED_DELEGATE_BASE_URL'),
             model_id=source.get('CLAWED_HELPER_MODEL_ID') or source.get('CLAWED_DELEGATE_MODEL'),
+            api_key=source.get('CLAWED_HELPER_API_KEY') or source.get('CLAWED_DELEGATE_API_KEY'),
             port=helper_port,
             runtime_dir=runtime_dir,
         ),
@@ -299,13 +337,14 @@ def _config_from_env(
     role: str,
     base_url: str | None,
     model_id: str | None,
+    api_key: str | None,
     port: int | None,
     runtime_dir: Path,
 ) -> ServiceConfig:
     prefix = 'CLAWED_MAIN' if role == 'main' else 'CLAWED_HELPER'
     lifecycle_raw = env.get(f'{prefix}_LIFECYCLE')
     model_path_raw = env.get(f'{prefix}_MODEL')
-    lifecycle_mode = _lifecycle_mode(lifecycle_raw, bool(model_path_raw))
+    lifecycle_mode = _lifecycle_mode(lifecycle_raw)
     host = env.get(f'{prefix}_HOST', '127.0.0.1')
     if base_url is None and port is not None:
         base_url = f'http://{host}:{port}/v1'
@@ -313,13 +352,15 @@ def _config_from_env(
         role=role,
         base_url=base_url,
         model_id=model_id,
+        api_key=api_key,
         lifecycle_mode=lifecycle_mode,
         host=host,
         port=port,
         runtime_dir=runtime_dir,
         pid_file=runtime_dir / f'{role}.pid',
         log_file=runtime_dir / f'{role}.log',
-        executable=env.get('CLAWED_SERVER_BIN') or env.get('CLAWED_LLAMA_SERVER_BIN') or 'llama-server',
+        owner_marker_file=runtime_dir / f'{role}.owner',
+        executable=env.get('CLAWED_SERVER_BIN') or env.get('CLAWED_LLAMA_SERVER_BIN'),
         model_path=Path(model_path_raw) if model_path_raw else None,
         context_size=_optional_int(env.get(f'{prefix}_CONTEXT_SIZE') or env.get('CLAWED_CONTEXT_SIZE')),
         cache_type_k=env.get('CLAWED_CACHE_TYPE_K'),
@@ -330,14 +371,37 @@ def _config_from_env(
     )
 
 
-def _lifecycle_mode(raw: str | None, has_model_path: bool) -> LifecycleMode:
+def _lifecycle_mode(raw: str | None) -> LifecycleMode:
     if raw == LifecycleMode.MANAGED_LOCAL_SERVER.value:
         return LifecycleMode.MANAGED_LOCAL_SERVER
     if raw == LifecycleMode.MANAGED_LLAMA_SERVER.value:
         return LifecycleMode.MANAGED_LOCAL_SERVER
     if raw == LifecycleMode.EXTERNAL.value:
         return LifecycleMode.EXTERNAL
-    return LifecycleMode.MANAGED_LOCAL_SERVER if has_model_path else LifecycleMode.EXTERNAL
+    return LifecycleMode.EXTERNAL
+
+
+def _auth_headers(config: ServiceConfig) -> dict[str, str]:
+    if config.api_key:
+        return {'Authorization': f'Bearer {config.api_key}'}
+    if config.base_url and _is_loopback_url(config.base_url):
+        return {'Authorization': 'Bearer local-token'}
+    return {}
+
+
+def _is_loopback_url(url: str) -> bool:
+    host = parse.urlparse(url).hostname
+    return host in {'127.0.0.1', 'localhost', '::1'}
+
+
+def _owner_marker_matches(path: Path | None, role: str, pid: int) -> bool:
+    if path is None or not path.exists():
+        return False
+    try:
+        parts = path.read_text(encoding='utf-8').split()
+    except OSError:
+        return False
+    return len(parts) >= 3 and parts[0] == 'dragon-clawed-tui' and parts[1] == role and parts[2] == str(pid)
 
 
 def _backend_result(config: ServiceConfig, health: BackendHealth, kind: ErrorKind | None, message: str) -> ServiceHealth:
